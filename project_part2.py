@@ -88,7 +88,7 @@ class InvertedIndex:
 
     def index_documents(self, documents):
         for did, doc in documents.items():
-            add_tf(did, compute_tf([v[1] for v in doc]), self.tf)
+            add_tf(did, compute_tf([v[2] for v in doc]), self.tf)
             self.pos_set.extend([v[3] for v in doc])
             self.ent_set.extend([v[4] for v in doc])
         self.tf_norm = calc_norm_tf(self.tf, lambda x: 1.0 + log(1.0 + log(x)))
@@ -142,29 +142,30 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx):
             one_hot_encoding(tfidx.ent_set, list(set(ents))))
         for candidate in v["candidate_entities"]:
             tf = max([0] +
-                     [get_tf(tfidx.tf, t.text, candidate) for t in tokens])
-            df = max([0] + [get_df(tfidx.tf, t.text) for t in tokens])
+                     [get_tf(tfidx.tf, t.lemma_, candidate) for t in tokens])
+            df = max([0] + [get_df(tfidx.tf, t.lemma_) for t in tokens])
             ttfidf = sum([
-                calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.text, candidate)
+                calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.lemma_, candidate)
                 for t in tokens
             ])
             etfidf = sum([
-                calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.text, candidate)
+                calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.lemma_, candidate)
                 for t in entities
             ])
             atf = sum([(1.0 - min([abs(i - sid), abs(i - eid)]) / len(nlpmen))
-                       * get_tf(tfidx.tf_norm, t.text, candidate) * get_idf(
-                           tfidx.idf, t.text) for i, t in enumerate(nlpmen)
+                       * get_tf(tfidx.tf_norm, t.lemma_, candidate) * get_idf(
+                           tfidx.idf, t.lemma_) for i, t in enumerate(nlpmen)
                        if not (sid <= i <= eid)])
-            title = [t.text for t in tokenizer(candidate.replace('_', ' '))]
+            title = [t.lemma_ for t in tokenizer(candidate.replace('_', ' '))]
             title_tfidf = sum([
-                get_idf(tfidx.idf, t.text) for t in tokens if t.text in title
+                get_idf(tfidx.idf, t.lemma_) for t in tokens
+                if t.lemma_ in title
             ])
             n_nums = len([c for c in mentions[k]['mention'] if c.isdigit()])
             n_nums_2 = len([c for c in candidate if c.isdigit()])
             all_caps = int(mentions[k]['mention'].isupper())
             n_caps = len([c for c in mentions[k]['mention'] if c.isupper()])
-            #idf = min([10] + [get_idf(tfidx.idf, t.text) for t in tokens])
+            #idf = min([10] + [get_idf(tfidx.idf, t.lemma_) for t in tokens])
             feature_vector = [
                 n_nums, n_nums_2, all_caps, n_caps, tf, df, ttfidf, etfidf,
                 atf, title_tfidf
