@@ -211,11 +211,15 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
         present = nlpmen[max([sent.start - 1, 0])].sent
         nxtsent = nlpmen[min([sent.end + 1, len(sent) - 1])].sent
         sents = list(set([present, sent, nxtsent]))
-        nouns = []
+        proxnouns = []
+        allnouns = []
         for s in sents:
             for t in s:
                 if t.pos_ in ["PROPN", "NOUN"]:
-                    nouns.append(t)
+                    proxnouns.append(t)
+        for t in nlpmen:
+            if t.pos_ in ["PROPN", "NOUN"]:
+                allnouns.append(t)
         shared_feature_vector = []
         shared_feature_vector.extend(one_hot_encoding(tfidx.pos_set, poss))
         shared_feature_vector.extend(one_hot_encoding(tfidx.ent_set, ents))
@@ -243,8 +247,12 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
             ])
             ntf = sum([
                 calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.lemma_, candidate)
-                for t in nouns
+                for t in proxnouns
             ])
+            antf = sum(
+                [(1.0 - min([abs(t.i - sid), abs(t.i - eid)]) / len(nlpmen)) *
+                 calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.lemma_, candidate)
+                 for t in allnouns])
             bm25 = sum([
                 score_BM25(
                     n=len(tfidx.tf[t.lemma_]),
@@ -307,6 +315,7 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 atf,
                 stf,
                 ntf,
+                antf,
                 bm25,
                 title_tfidf,
                 title_rtfidf,
