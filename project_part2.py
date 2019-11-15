@@ -5,13 +5,39 @@ from collections import Counter
 from itertools import combinations, chain
 from math import log
 import copy
-import math
 import spacy
 
 nlp = spacy.load('en_core_web_sm')
 np.set_printoptions(threshold=np.inf)
 
 tf_similarity_cache = {}
+
+
+def norm_ent_type(lemma, et):
+    if lemma.isdigit():
+        return "NUM"
+    return et.split('-')[-1]
+
+
+def compute_K(dl, avdl):
+    k1 = 1.2
+    k2 = 100
+    b = 0.75
+    R = 0.0
+    return k1 * ((1 - b) + b * (float(dl) / float(avdl)))
+
+
+def score_BM25(n, f, qf, r, N, dl, avdl):
+    k1 = 1.2
+    k2 = 100
+    b = 0.75
+    R = 0.0
+    K = compute_K(dl, avdl)
+    first = log(
+        ((r + 0.5) / (R - r + 0.5)) / ((n - r + 0.5) / (N - n - R + r + 0.5)))
+    second = ((k1 + 1) * f) / (K + f)
+    third = ((k2 + 1) * qf) / (k2 + qf)
+    return first * second * third
 
 
 def compute_tf(collection, counter=None):
@@ -120,20 +146,29 @@ class InvertedIndex:
 
         self.pos_set = []
         self.ent_set = []
+        self.avglen = 0
+        self.doclen = {}
 
     def index_documents(self, documents):
         for did, doc in documents.items():
+            self.doclen[did] = len(doc)
+            self.avglen += len(doc)
             self.pos_set.extend([v[3] for v in doc])
-            self.ent_set.extend([v[4] for v in doc])
+            self.ent_set.extend([norm_ent_type(v[2], v[4]) for v in doc])
         self.pos_set = list_to_map(self.pos_set)
-        self.ent_set = list_to_map(self.ent_set)
+        self.ent_set = list_to_map(list(set(self.ent_set) - set(["O"])))
+        self.avglen /= len(documents)
         for ent_type in self.ent_set.keys():
             self.entities[ent_type] = InvertedIndex()
         for did, doc in documents.items():
             add_tf(did, compute_tf([v[2] for v in doc]), self.tf)
             for ent_type in self.ent_set.keys():
-                add_tf(did, compute_tf([v[2] for v in doc]),
-                       self.entities[ent_type].tf)
+                add_tf(
+                    did,
+                    compute_tf([
+                        v[2] for v in doc
+                        if norm_ent_type(v[2], v[4]) == ent_type
+                    ]), self.entities[ent_type].tf)
         self.tf_norm = calc_norm_tf(self.tf, lambda x: 1.0 + log(1.0 + log(x)))
         self.idf = calc_idf(self.tf, len(documents))
         for k, v in self.entities.items():
@@ -174,6 +209,13 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
         eid = tokens[-1].i
         sent = tokens[0].sent
         present = nlpmen[max([sent.start - 1, 0])].sent
+        nxtsent = nlpmen[min([sent.end + 1, len(sent) - 1])].sent
+        sents = list(set([present, sent, nxtsent]))
+        nouns = []
+        for s in sents:
+            for t in s:
+                if t.pos_ in ["PROPN", "NOUN"]:
+                    nouns.append(t)
         shared_feature_vector = []
         shared_feature_vector.extend(one_hot_encoding(tfidx.pos_set, poss))
         shared_feature_vector.extend(one_hot_encoding(tfidx.ent_set, ents))
@@ -195,10 +237,28 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
             #    get_idf(tfidx.idf, t.lemma_) * 2 for i, t in enumerate(nlpmen)
             #    if not (sid <= i <= eid)
             #])
-            atf = sum([
+            stf = sum([
                 calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.lemma_, candidate)
                 for t in sent
             ])
+            ntf = sum([
+                calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.lemma_, candidate)
+                for t in nouns
+            ])
+            bm25 = sum([
+                score_BM25(
+                    n=len(tfidx.tf[t.lemma_]),
+                    f=get_tf(tfidx.tf, t.lemma_, candidate),
+                    qf=1,
+                    r=0,
+                    N=len(tfidx.doclen),
+                    dl=tfidx.doclen[candidate],
+                    avdl=tfidx.avglen) for t in sent if t.lemma_ in tfidx.tf
+            ])
+            atf = sum(
+                [(1.0 - min([abs(t.i - sid), abs(t.i - eid)]) / len(nlpmen)) *
+                 calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.lemma_, candidate)
+                 for t in nlpmen])
             atf_entities = []
             for ent_type, ent_idx in tfidx.entities.items():
                 if ent_type not in men_tfidx.entities:
@@ -206,9 +266,11 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 else:
                     atf_entities.append(
                         sum([
+                            (1.0 - min([abs(t.i - sid),
+                                        abs(t.i - eid)]) / len(nlpmen)) *
                             calc_tf_idf(ent_idx.tf_norm, ent_idx.idf, t.lemma_,
                                         candidate) for t in nlpmen
-                            if ent_idx.ent_type_ == k
+                            if norm_ent_type(t.lemma_, t.ent_type_) == ent_type
                         ]))
             #etf = sum(
             #    [(1.0 -
@@ -243,6 +305,9 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 etfidf,
                 #etf,
                 atf,
+                stf,
+                ntf,
+                bm25,
                 title_tfidf,
                 title_rtfidf,
                 tfs
