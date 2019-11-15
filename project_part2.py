@@ -215,10 +215,10 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
         allnouns = []
         for s in sents:
             for t in s:
-                if t.pos_ in ["PROPN", "NOUN"]:
+                if t.pos_ in ["PROPN", "NOUN", "NUM"]:
                     proxnouns.append(t)
         for t in nlpmen:
-            if t.pos_ in ["PROPN", "NOUN"]:
+            if t.pos_ in ["PROPN", "NOUN", "NUM"]:
                 allnouns.append(t)
         #shared_feature_vector = []
         #shared_feature_vector.extend(one_hot_encoding(tfidx.pos_set, poss))
