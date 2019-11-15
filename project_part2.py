@@ -297,11 +297,28 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
             tfs = tf_similarity(tfidx.tf_norm, tfidx.idf, candidate,
                                 men_tfidx.tf, men_tfidx.idf,
                                 mentions[k]['doc_title'])
+            tbm25 = sum([
+                score_BM25(
+                    n=len(men_tfidx.tf[t]),
+                    f=get_tf(men_tfidx.tf, t, mentions[k]['doc_title']),
+                    qf=1,
+                    r=0,
+                    N=len(men_tfidx.doclen),
+                    dl=men_tfidx.doclen[mentions[k]['doc_title']],
+                    avdl=men_tfidx.avglen) for t in title if t in men_tfidx.tf
+            ])
             n_nums = len([c for c in mentions[k]['mention'] if c.isdigit()])
             n_nums_2 = len([c for c in candidate if c.isdigit()])
             all_caps = int(mentions[k]['mention'].isupper())
             n_caps = len([c for c in mentions[k]['mention'] if c.isupper()])
             #idf = min([10] + [get_idf(tfidx.idf, t.lemma_) for t in tokens])
+            match_words = 0
+            for i in range(len(tokens)):
+                if i not in title:
+                    break
+                if tokens[i].lemma_.lower() == title[i].lower():
+                    match_words += get_idf(tfidx.idf, titile[i])
+            match_words /= len(tokens)
             feature_vector = [
                 n_nums,
                 n_nums_2,
@@ -317,9 +334,11 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 ntf,
                 antf,
                 bm25,
+                tbm25,
                 title_tfidf,
                 title_rtfidf,
-                tfs
+                tfs,
+                match_words
             ]
             feature_vector.extend(atf_entities)
             # feature_vector = [title_rtfidf, title_tfidf, atf, tf, df, ttfidf]
@@ -365,7 +384,8 @@ def disambiguate_mentions(train_mentions, train_labels, dev_mentions, men_docs,
     print("Building inverted index...")
     mindex = InvertedIndex()
     mindex.index_documents({
-        docid: [(v.idx, v.text, v.lemma_, v.pos_, v.ent_type_) for v in doc]
+        docid: [(v.idx, v.text, v.lemma_, v.pos_, v.ent_type_)
+                for v in doc]  #if not v.is_stop and not v.is_punct]
         for docid, doc in men_docs_nlp.items()
     })
     print("Generating feature space...")
