@@ -402,8 +402,8 @@ def disambiguate_mentions(train_mentions, train_labels, dev_mentions, men_docs,
 
     param = {
         'learning_rate': 0.1,
-        'n_estimators': 200,
-        'max_depth': 5,
+        'n_estimators': 50,
+        'max_depth': 3,
         'min_child_weight': 1,
         'gamma': 0,
         'subsample': 0.8,
@@ -415,6 +415,7 @@ def disambiguate_mentions(train_mentions, train_labels, dev_mentions, men_docs,
     ## Train the classifier...
     classifier = xgb.train(param, xgboost_train, num_boost_round=4900)
     print("Training complete.")
+    print(classifier.get_score(importance_type='gain'))
 
     print("Parsing eval data...")
     eval_data = gen_feature_space(dev_mentions, men_docs_nlp, index, mindex)
