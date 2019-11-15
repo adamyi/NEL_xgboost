@@ -317,8 +317,10 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 if i not in title:
                     break
                 if tokens[i].lemma_.lower() == title[i].lower():
-                    match_words += get_idf(tfidx.idf, titile[i])
+                    match_words += get_idf(tfidx.idf, title[i])
             match_words /= len(tokens)
+            all_match = int(" ".join(title).lower() == " ".join(
+                [t.lemma_.lower() for t in tokens]))
             feature_vector = [
                 n_nums,
                 n_nums_2,
@@ -338,7 +340,8 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 title_tfidf,
                 title_rtfidf,
                 tfs,
-                match_words
+                match_words,
+                all_match
             ]
             feature_vector.extend(atf_entities)
             # feature_vector = [title_rtfidf, title_tfidf, atf, tf, df, ttfidf]
