@@ -220,9 +220,9 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
         for t in nlpmen:
             if t.pos_ in ["PROPN", "NOUN"]:
                 allnouns.append(t)
-        shared_feature_vector = []
-        shared_feature_vector.extend(one_hot_encoding(tfidx.pos_set, poss))
-        shared_feature_vector.extend(one_hot_encoding(tfidx.ent_set, ents))
+        #shared_feature_vector = []
+        #shared_feature_vector.extend(one_hot_encoding(tfidx.pos_set, poss))
+        #shared_feature_vector.extend(one_hot_encoding(tfidx.ent_set, ents))
         for candidate in v["candidate_entities"]:
             tf = max([0] +
                      [get_tf(tfidx.tf, t.lemma_, candidate) for t in tokens])
@@ -313,9 +313,7 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
             n_caps = len([c for c in mentions[k]['mention'] if c.isupper()])
             #idf = min([10] + [get_idf(tfidx.idf, t.lemma_) for t in tokens])
             match_words = 0
-            for i in range(len(tokens)):
-                if i not in title:
-                    break
+            for i in range(min([len(tokens), len(title)])):
                 if tokens[i].lemma_.lower() == title[i].lower():
                     match_words += get_idf(tfidx.idf, title[i])
             match_words /= len(tokens)
