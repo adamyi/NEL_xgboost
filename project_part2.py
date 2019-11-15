@@ -5,10 +5,13 @@ from collections import Counter
 from itertools import combinations, chain
 from math import log
 import copy
-
+import math
 import spacy
 
 nlp = spacy.load('en_core_web_sm')
+np.set_printoptions(threshold=np.inf)
+
+tf_similarity_cache = {}
 
 
 def compute_tf(collection, counter=None):
@@ -76,9 +79,41 @@ def list_to_map(lst):
     return {k: v for v, k in enumerate(list(set(lst)))}
 
 
+def extract_tf(tf, idf, did):
+    ret = {}
+    for k, v in tf.items():
+        if did in v:
+            ret[k] = v[did] * idf[k]
+    return ret
+
+
+def tf_similarity(tf1, idf1, did1, tf2, idf2, did2):
+    if (did1, did2) in tf_similarity_cache:
+        return tf_similarity_cache[(did1, did2)]
+    etf1 = extract_tf(tf1, idf1, did1)
+    etf2 = extract_tf(tf2, idf2, did2)
+    allkeys = list(set(list(etf1.keys()) + list(etf2.keys())))
+    keymap = {v: k for k, v in enumerate(allkeys)}
+    vec1 = np.zeros(len(allkeys))
+    vec2 = np.zeros(len(allkeys))
+    for k, v in etf1.items():
+        vec1[keymap[k]] = v
+    for k, v in etf2.items():
+        vec2[keymap[k]] = v
+    #print(vec1)
+    #print(vec2)
+    dot = np.dot(vec1, vec2)
+    norm1 = np.linalg.norm(vec1)
+    norm2 = np.linalg.norm(vec2)
+    cos = dot / (norm1 * norm2)
+    tf_similarity_cache[(did1, did2)] = cos
+    return cos
+
+
 class InvertedIndex:
     def __init__(self):
         self.tf = {}
+        self.tf_entities = {}
         self.tf_norm = {}
 
         self.idf = {}
@@ -89,6 +124,7 @@ class InvertedIndex:
     def index_documents(self, documents):
         for did, doc in documents.items():
             add_tf(did, compute_tf([v[2] for v in doc]), self.tf)
+            add_tf(did, compute_tf([v[4] for v in doc]), self.tf_entities)
             self.pos_set.extend([v[3] for v in doc])
             self.ent_set.extend([v[4] for v in doc])
         self.tf_norm = calc_norm_tf(self.tf, lambda x: 1.0 + log(1.0 + log(x)))
@@ -107,39 +143,32 @@ def one_hot_encoding(enummap, enumvalues):
     ret = np.zeros(len(enummap))
     for v in enumvalues:
         if v in enummap:
-            ret[enummap[v]] = 1
+            ret[enummap[v]] += 1
     return ret
 
 
-def gen_feature_space(mentions, men_docs_nlp, tfidx):
+def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
     feature_space = []
     tokenizer = nlp.Defaults.create_tokenizer(nlp)
     for k, v in mentions.items():
         nlpmen = men_docs_nlp[mentions[k]['doc_title']]
-        poss = []
-        ents = []
-        tokens = []
-        entities = []
-        sid = -1
-        eid = -1
-        for i, token in enumerate(nlpmen):
-            if mentions[k]['offset'] <= token.idx and (token.idx + len(
-                    token)) <= (mentions[k]['offset'] + mentions[k]['length']):
-                if sid == -1:
-                    sid = i
-                eid = i
-                poss.append(token.pos_)
-                tokens.append(token)
-        for entity in nlpmen.ents:
-            if mentions[k]['offset'] <= entity.start and entity.end <= (
-                    mentions[k]['offset'] + mentions[k]['length']):
-                ents.append(entity.label_)
-                entities.append(entity)
+        span = nlpmen.char_span(mentions[k]['offset'],
+                                mentions[k]['offset'] + mentions[k]['length'])
+        if span is None:
+            for t in nlpmen:
+                if t.idx >= mentions[k]['offset']:
+                    span = nlpmen[t.i:t.i + 1]
+        tokens = [t for t in span]
+        poss = [t.pos_ for t in tokens]
+        entities = [t for t in span.ents]
+        ents = [t.label_ for t in entities]
+        sid = tokens[0].i
+        eid = tokens[-1].i
+        sent = tokens[0].sent
+        present = nlpmen[max([sent.start - 1, 0])].sent
         shared_feature_vector = []
-        shared_feature_vector.extend(
-            one_hot_encoding(tfidx.pos_set, list(set(poss))))
-        shared_feature_vector.extend(
-            one_hot_encoding(tfidx.ent_set, list(set(ents))))
+        shared_feature_vector.extend(one_hot_encoding(tfidx.pos_set, poss))
+        shared_feature_vector.extend(one_hot_encoding(tfidx.ent_set, ents))
         for candidate in v["candidate_entities"]:
             tf = max([0] +
                      [get_tf(tfidx.tf, t.lemma_, candidate) for t in tokens])
@@ -152,26 +181,55 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx):
                 calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.lemma_, candidate)
                 for t in entities
             ])
-            atf = sum([(1.0 - min([abs(i - sid), abs(i - eid)]) / len(nlpmen))
-                       * get_tf(tfidx.tf_norm, t.lemma_, candidate) * get_idf(
-                           tfidx.idf, t.lemma_) for i, t in enumerate(nlpmen)
-                       if not (sid <= i <= eid)])
+            #atf = sum([
+            #    math.sqrt(1.0 - min([abs(i - sid), abs(i - eid)]) / len(nlpmen)
+            #              ) * get_tf(tfidx.tf_norm, t.lemma_, candidate) *
+            #    get_idf(tfidx.idf, t.lemma_) * 2 for i, t in enumerate(nlpmen)
+            #    if not (sid <= i <= eid)
+            #])
+            atf = sum([
+                calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.lemma_, candidate)
+                for t in sent
+            ])
+            etf = sum(
+                [(1.0 -
+                  min([abs(t.idx - sid), abs(t.idx - eid)]) / len(nlpmen)) *
+                 get_tf(tfidx.tf_entities, t.ent_type_, candidate)
+                 for t in nlpmen])
             title = [t.lemma_ for t in tokenizer(candidate.replace('_', ' '))]
             title_tfidf = sum([
                 get_idf(tfidx.idf, t.lemma_) for t in tokens
                 if t.lemma_ in title
             ])
+            title_rtfidf = sum([
+                calc_tf_idf(men_tfidx.tf_norm, men_tfidx.idf, t,
+                            mentions[k]['doc_title']) for t in title
+            ])
+            tfs = tf_similarity(tfidx.tf_norm, tfidx.idf, candidate,
+                                men_tfidx.tf, men_tfidx.idf,
+                                mentions[k]['doc_title'])
             n_nums = len([c for c in mentions[k]['mention'] if c.isdigit()])
             n_nums_2 = len([c for c in candidate if c.isdigit()])
             all_caps = int(mentions[k]['mention'].isupper())
             n_caps = len([c for c in mentions[k]['mention'] if c.isupper()])
             #idf = min([10] + [get_idf(tfidx.idf, t.lemma_) for t in tokens])
             feature_vector = [
-                n_nums, n_nums_2, all_caps, n_caps, tf, df, ttfidf, etfidf,
-                atf, title_tfidf
+                n_nums,
+                n_nums_2,
+                all_caps,
+                n_caps,
+                #tf,
+                #df,
+                ttfidf,
+                etfidf,
+                #etf,
+                atf,
+                title_tfidf,
+                title_rtfidf,
+                tfs
             ]
-            # feature_vector = [tf, df, atf]
-            feature_vector.extend(shared_feature_vector)
+            # feature_vector = [title_rtfidf, title_tfidf, atf, tf, df, ttfidf]
+            # feature_vector.extend(shared_feature_vector)
             feature_space.append(feature_vector)
     return np.array(feature_space)
 
@@ -210,14 +268,20 @@ def disambiguate_mentions(train_mentions, train_labels, dev_mentions, men_docs,
     print(len(index.ent_set))
     print("Running SpaCy on men_docs corpus...")
     men_docs_nlp = {k: nlp(v) for k, v in men_docs.items()}
+    print("Building inverted index...")
+    mindex = InvertedIndex()
+    mindex.index_documents({
+        docid: [(v.idx, v.text, v.lemma_, v.pos_, v.ent_type_) for v in doc]
+        for docid, doc in men_docs_nlp.items()
+    })
     print("Generating feature space...")
 
-    train_data = gen_feature_space(train_mentions, men_docs_nlp, index)
+    train_data = gen_feature_space(train_mentions, men_docs_nlp, index, mindex)
     train_label = gen_train_labels(train_mentions, train_labels)
 
     print("train_data shape:", train_data.shape)
     print("train_label shape:", train_label.shape)
-    print(train_data)
+    # print(train_data)
     print(train_label[:5])
     print(sum(train_label))
 
@@ -259,7 +323,7 @@ def disambiguate_mentions(train_mentions, train_labels, dev_mentions, men_docs,
     print("Training complete.")
 
     print("Parsing eval data...")
-    eval_data = gen_feature_space(dev_mentions, men_docs_nlp, index)
+    eval_data = gen_feature_space(dev_mentions, men_docs_nlp, index, mindex)
     eval_groups = gen_train_groups(dev_mentions)
 
     xgboost_test = transform_data(eval_data, eval_groups)
