@@ -113,8 +113,8 @@ def tf_similarity(tf1, idf1, did1, tf2, idf2, did2):
 class InvertedIndex:
     def __init__(self):
         self.tf = {}
-        self.tf_entities = {}
         self.tf_norm = {}
+        self.entities = {}
 
         self.idf = {}
 
@@ -123,14 +123,22 @@ class InvertedIndex:
 
     def index_documents(self, documents):
         for did, doc in documents.items():
-            add_tf(did, compute_tf([v[2] for v in doc]), self.tf)
-            add_tf(did, compute_tf([v[4] for v in doc]), self.tf_entities)
             self.pos_set.extend([v[3] for v in doc])
             self.ent_set.extend([v[4] for v in doc])
-        self.tf_norm = calc_norm_tf(self.tf, lambda x: 1.0 + log(1.0 + log(x)))
-        self.idf = calc_idf(self.tf, len(documents))
         self.pos_set = list_to_map(self.pos_set)
         self.ent_set = list_to_map(self.ent_set)
+        for ent_type in self.ent_set.keys():
+            self.entities[ent_type] = InvertedIndex()
+        for did, doc in documents.items():
+            add_tf(did, compute_tf([v[2] for v in doc]), self.tf)
+            for ent_type in self.ent_set.keys():
+                add_tf(did, compute_tf([v[2] for v in doc]),
+                       self.entities[ent_type].tf)
+        self.tf_norm = calc_norm_tf(self.tf, lambda x: 1.0 + log(1.0 + log(x)))
+        self.idf = calc_idf(self.tf, len(documents))
+        for k, v in self.entities.items():
+            v.tf_norm = calc_norm_tf(v.tf, lambda x: 1.0 + log(1.0 + log(x)))
+            v.idf = calc_idf(v.tf, len(documents))
 
 
 def transform_data(features, groups, labels=None):
@@ -191,11 +199,22 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 calc_tf_idf(tfidx.tf_norm, tfidx.idf, t.lemma_, candidate)
                 for t in sent
             ])
-            etf = sum(
-                [(1.0 -
-                  min([abs(t.idx - sid), abs(t.idx - eid)]) / len(nlpmen)) *
-                 get_tf(tfidx.tf_entities, t.ent_type_, candidate)
-                 for t in nlpmen])
+            atf_entities = []
+            for ent_type, ent_idx in tfidx.entities.items():
+                if ent_type not in men_tfidx.entities:
+                    atf_entities.append(0)
+                else:
+                    atf_entities.append(
+                        sum([
+                            calc_tf_idf(ent_idx.tf_norm, ent_idx.idf, t.lemma_,
+                                        candidate) for t in nlpmen
+                            if ent_idx.ent_type_ == k
+                        ]))
+            #etf = sum(
+            #    [(1.0 -
+            #      min([abs(t.idx - sid), abs(t.idx - eid)]) / len(nlpmen)) *
+            #     get_tf(tfidx.tf_entities, t.ent_type_, candidate)
+            #     for t in nlpmen])
             title = [t.lemma_ for t in tokenizer(candidate.replace('_', ' '))]
             title_tfidf = sum([
                 get_idf(tfidx.idf, t.lemma_) for t in tokens
@@ -228,6 +247,7 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 title_rtfidf,
                 tfs
             ]
+            feature_vector.extend(atf_entities)
             # feature_vector = [title_rtfidf, title_tfidf, atf, tf, df, ttfidf]
             # feature_vector.extend(shared_feature_vector)
             feature_space.append(feature_vector)
