@@ -285,7 +285,9 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
             #      min([abs(t.idx - sid), abs(t.idx - eid)]) / len(nlpmen)) *
             #     get_tf(tfidx.tf_entities, t.ent_type_, candidate)
             #     for t in nlpmen])
-            title = [t.lemma_ for t in tokenizer(candidate.replace('_', ' '))]
+            title_tokens = nlp(candidate.replace('_', ' '))
+            title = [t.lemma_ for t in title_tokens]
+            title_root = [t.lemma_ for t in title_tokens if t.dep_ == "ROOT"]
             title_tfidf = sum([
                 get_idf(tfidx.idf, t.lemma_) for t in tokens
                 if t.lemma_ in title
@@ -293,6 +295,10 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
             title_rtfidf = sum([
                 calc_tf_idf(men_tfidx.tf_norm, men_tfidx.idf, t,
                             mentions[k]['doc_title']) for t in title
+            ])
+            root_title_tfidf = sum([
+                calc_tf_idf(men_tfidx.tf_norm, men_tfidx.idf, t,
+                            mentions[k]['doc_title']) for t in title_root
             ])
             tfs = tf_similarity(tfidx.tf_norm, tfidx.idf, candidate,
                                 men_tfidx.tf, men_tfidx.idf,
@@ -341,6 +347,7 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 tbm25,
                 title_tfidf,
                 title_rtfidf,
+                root_title_tfidf,
                 tfs,
                 match_words,
                 all_match
