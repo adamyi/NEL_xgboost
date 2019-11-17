@@ -424,18 +424,9 @@ def disambiguate_mentions(train_mentions, train_labels, dev_mentions, men_docs,
     ## Parameters for XGBoost, you can fine-tune these parameters according to your settings...
 
     param = {
-        'max_depth': 5,
-        'eta': 0.05,
-        'objective': 'rank:pairwise',
-        'min_child_weight': 0.01,
-        'n_estimators': 5000,
-        'lambda': 100
-    }
-
-    param = {
         'learning_rate': 0.1,
         'n_estimators': 50,
-        'max_depth': 3,
+        'max_depth': 5,
         'min_child_weight': 1,
         'gamma': 0,
         'subsample': 0.8,
@@ -445,7 +436,7 @@ def disambiguate_mentions(train_mentions, train_labels, dev_mentions, men_docs,
 
     print("Training...")
     ## Train the classifier...
-    classifier = xgb.train(param, xgboost_train, num_boost_round=4900)
+    classifier = xgb.train(param, xgboost_train, num_boost_round=330)
     print("Training complete.")
     print(classifier.get_score(importance_type='gain'))
 
