@@ -319,9 +319,13 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
             match_words /= len(tokens)
             all_match = int(" ".join(title).lower() == " ".join(
                 [t.lemma_.lower() for t in tokens]))
+            len_mention = len(tokens)
+            len_title = len(title)
             feature_vector = [
                 n_nums,
                 n_nums_2,
+                len_mention,
+                len_title,
                 all_caps,
                 n_caps,
                 #tf,
