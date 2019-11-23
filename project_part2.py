@@ -136,6 +136,37 @@ def tf_similarity(tf1, idf1, did1, tf2, idf2, did2):
     return cos
 
 
+def tf_similarity_across_documents(doclen, tf, tok1, tok2):
+    keymap = {}
+    nkeys = 0
+    vec1 = np.zeros(doclen)
+    vec2 = np.zeros(doclen)
+    for t in tok1:
+        if t in tf:
+            for doc, freq in tf[t].items():
+                if doc not in keymap:
+                    keymap[doc] = nkeys
+                    nkeys += 1
+                vec1[keymap[doc]] += freq
+    for t in tok2:
+        if t in tf:
+            for doc, freq in tf[t].items():
+                if doc not in keymap:
+                    keymap[doc] = nkeys
+                    nkeys += 1
+                vec2[keymap[doc]] += freq
+    vec1 /= len(tok1)
+    vec2 /= len(tok2)
+    # smoothing = np.full(doclen, 2)
+    # vec1 += smoothing
+    # vec2 += smoothing
+    dot = np.dot(vec1, vec2)
+    norm1 = np.linalg.norm(vec1) + 1
+    norm2 = np.linalg.norm(vec2) + 1
+    cos = dot / (norm1 * norm2)
+    return cos
+
+
 class InvertedIndex:
     def __init__(self):
         self.tf = {}
@@ -327,6 +358,15 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 [t.lemma_.lower() for t in tokens]))
             len_mention = len(tokens)
             len_title = len(title)
+            ttfs = tf_similarity_across_documents(
+                len(tfidx.doclen),
+                tfidx.tf,
+                [
+                    t.lemma_
+                    for t in title_tokens  #if not t.is_stop and not t.is_punct
+                ],
+                [t.lemma_
+                 for t in tokens])  # if not t.is_stop and not t.is_punct])
             feature_vector = [
                 n_nums,
                 n_nums_2,
@@ -349,6 +389,7 @@ def gen_feature_space(mentions, men_docs_nlp, tfidx, men_tfidx):
                 title_rtfidf,
                 root_title_tfidf,
                 tfs,
+                ttfs,
                 match_words,
                 all_match
             ]
